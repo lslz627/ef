@@ -22,6 +22,7 @@
 #include "coroutine.h"
 #include "util/list.h"
 #include "util/util.h"
+#include "log.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +30,7 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include "log.h"
 
 /*
  * the global pointer
@@ -40,6 +42,7 @@ inline int ef_routine_run(ef_runtime_t *rt, ef_routine_proc_t proc, int socket) 
 
 long ef_proc(void *param)
 {
+    log_info("框架协程执行体入口");
     ef_routine_t *er = (ef_routine_t*)param;
     int fd = er->poll_data.fd;
     long retval = 0;
@@ -84,6 +87,7 @@ inline int ef_queue_fd(ef_runtime_t *rt, ef_listen_info_t *li, int fd)
         }
     }
 
+    // 优先从空闲链表中、获取一个元素
     if (!ef_list_empty(&rt->free_fd_list)) {
         qf = CAST_PARENT_PTR(ef_list_remove_after(&rt->free_fd_list), ef_queue_fd_t, list_entry);
     } else {
@@ -178,6 +182,7 @@ int ef_run_loop(ef_runtime_t *rt)
      * the main event loop
      */
     while (1) {
+        // 每次最多处理，1024 个、已经准备好的文件描述符的的事件
         int cnt = rt->p->wait(rt->p, &evts[0], 1024, 1000);
         if (cnt < 0 && errno != EINTR) {
             return cnt;
@@ -191,7 +196,9 @@ int ef_run_loop(ef_runtime_t *rt)
             if (ed->type == FD_TYPE_LISTEN) {
                 while (1) {
                     int socket = accept(ed->fd, NULL, NULL);
+                    // 如果接收队列里面没有新的连入项、直接退出
                     if (socket < 0) {
+//                        log_info("%s", strerror(errno));
                         rt->p->unset(rt->p, ed->fd, EF_POLLIN);
                         break;
                     }

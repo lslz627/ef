@@ -34,6 +34,8 @@
 
 .text
 
+# %rdi-> *new_sp, %rsi -> **old_sp_ptr, %rdx -> retval
+# %rax -> 用于第一个返回寄存器
 ef_fiber_internal_swap:
 mov %rdx,%rax
 push %rbx
@@ -48,9 +50,13 @@ push %r12
 push %r13
 push %r14
 push %r15
+# PUSHF/PUSHFD/PUSHFQ — Push EFLAGS Register onto the Stack
+# https://www.felixcloutier.com/x86/pushf:pushfd:pushfq
+# 标志寄存器的值压栈
 pushfq
 mov %rsp,(%rsi)
 mov %rdi,%rsp
+# 下面的过程会继续执行、因为没有遇到 ret
 _ef_fiber_restore:
 popfq
 pop %r15
@@ -77,6 +83,12 @@ mov %rcx,SCHED_CURRENT_FIBER_OFFSET(%rdx)
 mov FIBER_STACK_PTR_OFFSET(%rcx),%rsp
 jmp _ef_fiber_restore
 
+# void ef_fiber_init(ef_fiber_t *fiber, ef_fiber_proc_t fiber_proc, void *param)
+# %rdi-> *fiber, %rsi -> fiber_proc, %rdx -> *param
+# %rax -> 用于第一个返回寄存器
+
+# 下面这个过程、是为了配合 _ef_fiber_restore 过程而进行的初始化
+
 ef_fiber_internal_init:
 mov $FIBER_STATUS_INITED,%rax
 mov %rax,FIBER_STATUS_OFFSET(%rdi)
@@ -85,6 +97,7 @@ mov FIBER_STACK_UPPER_OFFSET(%rdi),%rdi
 mov %rcx,-8(%rdi)
 lea _ef_fiber_exit(%rip),%rax
 mov %rax,-16(%rdi)
+# %rsi -> ef_fiber_proc_t fiber_proc
 mov %rsi,-24(%rdi)
 xor %rax,%rax
 mov %rax,-32(%rdi)

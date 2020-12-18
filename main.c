@@ -23,6 +23,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include "framework.h"
+#include "log.h"
 
 ef_runtime_t efr = {0};
 
@@ -34,6 +35,9 @@ ef_runtime_t efr = {0};
 // use HTTP/1.0 or set http header 'Connection: Close'
 long forward_proc(int fd, ef_routine_t *er)
 {
+    // debug
+    int debug[1024 * 8];
+    log_info("forward_proc");
     char buffer[BUFFER_SIZE];
     ssize_t r = ef_routine_read(er, fd, buffer, BUFFER_SIZE);
     if(r <= 0)
@@ -43,7 +47,7 @@ long forward_proc(int fd, ef_routine_t *er)
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     struct sockaddr_in addr_in = {0};
     addr_in.sin_family = AF_INET;
-    addr_in.sin_port = htons(80);
+    addr_in.sin_port = htons(8000);
     int ret = ef_routine_connect(er, sockfd, (const struct sockaddr *)&addr_in, sizeof(addr_in));
     if(ret < 0)
     {
@@ -79,7 +83,8 @@ exit_proc:
 
 long greeting_proc(int fd, ef_routine_t *er)
 {
-    char resp_ok[] = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 26\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nWelcome to the EFramework!";
+    log_info("greeting_proc");
+    char resp_ok[] = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 27\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nWelcome to the EFramework!\n";
     char buffer[BUFFER_SIZE];
     ssize_t r = ef_routine_read(er, fd, buffer, BUFFER_SIZE);
     if(r <= 0)
@@ -97,17 +102,20 @@ long greeting_proc(int fd, ef_routine_t *er)
         }
         wrt += w;
     }
+    close(fd);
+    
     return 0;
 }
 
 void signal_handler(int num)
 {
+    log_info("%s", strsignal(num));
     efr.stopping = 1;
 }
 
 int main(int argc, char *argv[])
 {
-    if (ef_init(&efr, 64 * 1024, 256, 512, 1000 * 60, 16) < 0) {
+    if (ef_init(&efr, 8 * 1024, 256, 512, 1000 * 60, 16) < 0) {
         return -1;
     }
 
@@ -119,6 +127,7 @@ int main(int argc, char *argv[])
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if(sockfd < 0)
     {
+        log_info("%s", strerror(errno));
         return -1;
     }
     struct sockaddr_in addr_in = {0};
@@ -127,6 +136,7 @@ int main(int argc, char *argv[])
     int retval = bind(sockfd, (const struct sockaddr *)&addr_in, sizeof(addr_in));
     if(retval < 0)
     {
+        log_info("%s", strerror(errno));
         return -1;
     }
     listen(sockfd, 512);
@@ -135,12 +145,14 @@ int main(int argc, char *argv[])
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if(sockfd < 0)
     {
+        log_info("%s", strerror(errno));
         return -1;
     }
-    addr_in.sin_port = htons(80);
+    addr_in.sin_port = htons(8000);
     retval = bind(sockfd, (const struct sockaddr *)&addr_in, sizeof(addr_in));
     if(retval < 0)
     {
+        log_info("%s", strerror(errno));
         return -1;
     }
     listen(sockfd, 512);

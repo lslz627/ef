@@ -22,6 +22,7 @@
 #define _FIBER_HEADER_
 
 #include <sys/mman.h>
+#include "log.h"
 
 #define ERROR_FIBER_EXITED     (-1)
 #define ERROR_FIBER_NOT_INITED (-2)
@@ -60,7 +61,7 @@ typedef struct _ef_fiber_sched ef_fiber_sched_t;
     |                |
     |                |
     |----------------|
-    | one page guard |
+    | one page guard | // 当 stack_size > page_size, 才会有这个 page guard 保证的
     |----------------| <- stack_area
 
 */

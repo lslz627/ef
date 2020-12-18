@@ -26,6 +26,24 @@
 static long ef_page_size = 0;
 static ef_fiber_sched_t *ef_fiber_sched = NULL;
 
+/**
+[64位汇编参数传递](http://abcdxyzk.github.io/blog/2012/11/23/assembly-args/)
+64位汇编
+当参数少于7个时， 参数从左到右放入寄存器: rdi, rsi, rdx, rcx, r8, r9。
+当参数为7个以上时， 前 6 个与前面一样， 但后面的依次从 “右向左” 放入栈中，即和32位汇编一样。
+
+返回值: rax 用于第一个返回寄存器
+
+参数个数大于 7 个的时候
+H(a, b, c, d, e, f, g, h);
+a->%rdi, b->%rsi, c->%rdx, d->%rcx, e->%r8, f->%r9
+h->8(%esp)
+g->(%esp)
+call H
+
+对应这里
+news_sp -> %rdi, old_sp_ptr -> %rsi, retval -> %rdx
+*/
 long ef_fiber_internal_swap(void *new_sp, void **old_sp_ptr, long retval);
 
 void *ef_fiber_internal_init(ef_fiber_t *fiber, ef_fiber_proc_t fiber_proc, void *param);
@@ -44,6 +62,7 @@ ef_fiber_t *ef_fiber_create(ef_fiber_sched_t *rt, size_t stack_size, size_t head
      * make the stack_size an integer multiple of page_size
      */
     stack_size = (size_t)((stack_size + page_size - 1) & ~(page_size - 1));
+    log_info("stack_size: %d", stack_size);
 
     /*
      * reserve the stack area, no physical pages here
@@ -75,8 +94,54 @@ ef_fiber_t *ef_fiber_create(ef_fiber_sched_t *rt, size_t stack_size, size_t head
     return fiber;
 }
 
+/**
+fiber -> %rdi, fiber_proc -> %rsi, param -> %rdx
+*/
 void ef_fiber_init(ef_fiber_t *fiber, ef_fiber_proc_t fiber_proc, void *param)
 {
+    /**
+           ┌──────────────┐
+           │      .       │
+           │      .       │
+           │      .       │
+           ├──────────────┤
+           │              │
+           ├──────────────┤
+           │fiber header..│
+ &fiber ─▶ ├──────────────┤◀──&(fiber->stack_upper)
+           │   &fiber     │
+           ├──────────────┤
+           │&_ef_fiber_exit
+           ├──────────────┤
+           │  &fiber_proc │◀──routine actual execute entry
+   24 ────▶├──────────────┤
+           │      0       │
+           ├──────────────┤
+           │    &fiber    │
+   40  ───▶├──────────────┤
+           │      0       │
+           ├──────────────┤
+           │    *param    │◀─────actual value is &fiber
+   56  ───▶├──────────────┤
+           │      0       │
+   64  ───▶├──────────────┤
+           │              │
+           │              │
+           │              │
+           │              │
+           ├──────────────┤
+           │      0       │
+  128 ────▶├──────────────┤ ◀───── %rax (return value) %rsp
+           │              │
+           │              │
+           │              │
+           │              │
+           └──────────────┘
+     */
+
+    // 下面函数的作用是、初始化像上面的这样的函数栈
+    // _ef_fiber_restore 这个汇编段，会把 24(%rsp) 这里存储的值 ( &fiber_proc )，实际值：long ef_proc(void *param)
+    // 的恢复出来、然后进行调用
     fiber->stack_ptr = ef_fiber_internal_init(fiber, fiber_proc, (param != NULL) ? param : fiber);
 }
 
@@ -93,6 +158,8 @@ int ef_fiber_resume(ef_fiber_sched_t *rt, ef_fiber_t *to, long sndval, long *ret
 {
     long ret;
     ef_fiber_t *current;
+    // int i = 0;
+    // log_info("i = %d", i);
 
     /*
      * ensure the fiber is initialized and not exited
@@ -124,6 +191,7 @@ long ef_fiber_yield(ef_fiber_sched_t *rt, long sndval)
 
 int ef_fiber_expand_stack(ef_fiber_t *fiber, void *addr)
 {
+    log_info("ef_fiber_expand_stack");
     int retval = -1;
 
     /*
@@ -147,6 +215,8 @@ int ef_fiber_expand_stack(ef_fiber_t *fiber, void *addr)
 
 void ef_fiber_sigsegv_handler(int sig, siginfo_t *info, void *ucontext)
 {
+    log_info("%s", strsignal(sig));
+
     /*
      * we need core dump if failed to expand fiber stack
      */
@@ -168,6 +238,7 @@ int ef_fiber_init_sched(ef_fiber_sched_t *rt, int handle_sigsegv)
 
     rt->current_fiber = &rt->thread_fiber;
     ef_page_size = sysconf(_SC_PAGESIZE);
+    log_info("ef_page_size: %d", ef_page_size);
     if (ef_page_size < 0) {
         return -1;
     }
@@ -184,8 +255,9 @@ int ef_fiber_init_sched(ef_fiber_sched_t *rt, int handle_sigsegv)
         return -1;
     }
     ss.ss_size = SIGSTKSZ;
-    ss.ss_flags = 0;
+    ss.ss_flags = SA_ONSTACK;
     if (sigaltstack(&ss, NULL) == -1) {
+        log_info("%s", strerror(errno));
         return -1;
     }
 
